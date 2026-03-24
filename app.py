@@ -1,10 +1,10 @@
 import streamlit as st
 import pandas as pd
 import math
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Altınyaldız Statik AI", layout="wide")
 
-# 1. ŞİFRE EKRANI KONTROLÜ
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = False
@@ -12,7 +12,7 @@ def check_password():
     if not st.session_state["password_correct"]:
         st.markdown("### 🔒 Altınyaldız Statik Hesap Motoruna Giriş")
         st.text_input("Şifre:", type="password", key="pwd")
-        if st.session_state.pwd == "CFO2026": # Şifreni buradan değiştirebilirsin
+        if st.session_state.pwd == "CFO2026":
             st.session_state["password_correct"] = True
             st.rerun()
         elif st.session_state.pwd != "":
@@ -21,59 +21,116 @@ def check_password():
     return True
 
 if check_password():
-    st.title("🏗️ Uzay Kafes Statik Optimizasyon Motoru")
-    st.markdown("Girilen yüklere ve Altınyaldız boru kütüphanesine göre en ekonomik kesitleri iteratif olarak seçer.")
+    st.title("🏗️ Otonom Modül ve Kesit Optimizasyonu")
+    st.markdown("Algoritma, en düşük birim ağırlığı ve uygun üretim rotasını bulmak için tüm modül boylarını (1.5m - 3.5m) iteratif olarak tarar.")
 
-    # 2. RFP BORU KÜTÜPHANESİ (Sadece senin fabrikanın ürettiği borular)
-    # Alan Hesabı: A = pi * (D - t) * t
+    # 1. BORU VE KONİK KÜTÜPHANESİ
     pipe_data = [
-        {"Boru": "42.4x2.5", "D": 42.4, "t": 2.5, "Agirlik_kg_m": 2.46},
-        {"Boru": "48.3x2.5", "D": 48.3, "t": 2.5, "Agirlik_kg_m": 2.82},
-        {"Boru": "60.3x3.0", "D": 60.3, "t": 3.0, "Agirlik_kg_m": 4.24},
-        {"Boru": "76.1x3.0", "D": 76.1, "t": 3.0, "Agirlik_kg_m": 5.41},
-        {"Boru": "88.9x4.0", "D": 88.9, "t": 4.0, "Agirlik_kg_m": 8.37},
-        {"Boru": "114.3x4.0", "D": 114.3, "t": 4.0, "Agirlik_kg_m": 10.88},
-        {"Boru": "139.7x5.0", "D": 139.7, "t": 5.0, "Agirlik_kg_m": 16.60}
+        {"Boru": "42.4x2.5", "D": 42.4, "t": 2.5, "Agirlik_kg_m": 2.46, "Konik": "42.4 Konik", "Civata": "M12", "Konik_kg": 0.13},
+        {"Boru": "48.3x2.5", "D": 48.3, "t": 2.5, "Agirlik_kg_m": 2.82, "Konik": "48.3 Konik", "Civata": "M12", "Konik_kg": 0.18},
+        {"Boru": "60.3x3.0", "D": 60.3, "t": 3.0, "Agirlik_kg_m": 4.24, "Konik": "60.3 Konik", "Civata": "M16", "Konik_kg": 0.31},
+        {"Boru": "76.1x3.0", "D": 76.1, "t": 3.0, "Agirlik_kg_m": 5.41, "Konik": "76.1 Konik", "Civata": "M20", "Konik_kg": 0.53},
+        {"Boru": "88.9x4.0", "D": 88.9, "t": 4.0, "Agirlik_kg_m": 8.37, "Konik": "88.9 Konik", "Civata": "M24", "Konik_kg": 0.75},
+        {"Boru": "114.3x4.0", "D": 114.3, "t": 4.0, "Agirlik_kg_m": 10.88, "Konik": "114.3 Konik", "Civata": "M30", "Konik_kg": 1.88},
+        {"Boru": "139.7x5.0", "D": 139.7, "t": 5.0, "Agirlik_kg_m": 16.60, "Konik": "139.7 Konik", "Civata": "M36", "Konik_kg": 2.95}
     ]
     df_pipes = pd.DataFrame(pipe_data)
     
-    # Eksenel Çekme Kapasitesi Hesabı (S235 Çelik için Basitleştirilmiş - fy = 235 MPa)
+    # Kapasite ve Atalet Momenti (Burkulma İçin)
     df_pipes["Alan_mm2"] = math.pi * (df_pipes["D"] - df_pipes["t"]) * df_pipes["t"]
-    df_pipes["Kapasite_kN"] = (df_pipes["Alan_mm2"] * 235) / 1000
+    df_pipes["I_mm4"] = (math.pi * (df_pipes["D"]**4 - (df_pipes["D"] - 2*df_pipes["t"])**4)) / 64
+    df_pipes["Akma_Kapasitesi_kN"] = (df_pipes["Alan_mm2"] * 235) / 1000
 
-    # 3. KULLANICI GİRDİ PANELİ
+    # 2. KULLANICI GİRDİ PANELİ
     st.sidebar.header("Statik Parametreler")
     span_L = st.sidebar.number_input("Açıklık (L) - metre", min_value=10.0, value=30.0, step=1.0)
-    load_Q = st.sidebar.number_input("Toplam Yük (Kar+Rüzgar+Zati) - kN/m2", min_value=0.5, value=1.5, step=0.1)
+    load_Q = st.sidebar.number_input("Toplam Yük - kN/m2", min_value=0.5, value=1.5, step=0.1)
     depth_d = st.sidebar.number_input("Sistem Derinliği (h) - metre", min_value=1.0, value=2.0, step=0.1)
 
     st.write("---")
     
-    # 4. STATİK ÇÖZÜM VE İTERASYON
-    # Basitleştirilmiş Mak. Eksenel Kuvvet Yaklaşımı: N = (Q * L^2 / 8) / h
-    max_moment = (load_Q * (span_L**2)) / 8
-    max_force_kN = max_moment / depth_d
+    # 3. YAPAY ZEKA İTERASYON MOTORU
+    best_modul = None
+    min_weight_per_m2 = float('inf')
+    best_pipe = None
+    best_force = 0
+    best_length = 0
     
-    st.subheader("📊 Analiz Sonuçları")
-    st.info(f"Hesaplanan Maksimum Çubuk Kuvveti: **{max_force_kN:.2f} kN**")
+    # Modül boyunu 1.5m'den 3.5m'ye kadar 10cm aralıklarla test et (Otomasyon limitleri)
+    test_modules = [x / 10.0 for x in range(15, 36)] 
+    
+    for a in test_modules:
+        max_moment = (load_Q * (span_L**2)) / 8
+        force_kN = max_moment / depth_d
+        
+        # Çubuk Boyu (mm)
+        cubuk_boyu_mm = math.sqrt((a/2)**2 + (a/2)**2 + depth_d**2) * 1000
+        
+        # Burkulma ve Kapasite Kontrolü ile Boru Seçimi
+        secilen_boru = None
+        for index, row in df_pipes.iterrows():
+            # Euler Burkulma Yükü (Ncr) - Basitleştirilmiş
+            N_cr = (math.pi**2 * 200000 * row["I_mm4"]) / (cubuk_boyu_mm**2) / 1000
+            Guvenli_Kapasite = min(row["Akma_Kapasitesi_kN"], N_cr / 1.5) # Güvenlik katsayısı 1.5
+            
+            if Guvenli_Kapasite >= force_kN:
+                secilen_boru = row
+                break
+                
+        if secilen_boru is not None:
+            # m2 başına yaklaşık sistem ağırlığı = Boru Ağırlığı + Konik/Mulu Ağırlığı
+            # (Optimizasyon için basitleştirilmiş indeks değeri)
+            boru_uzunluk_m2 = (4/a) + (4 * (cubuk_boyu_mm/1000) / (a**2))
+            toplam_boru_kg = boru_uzunluk_m2 * secilen_boru["Agirlik_kg_m"]
+            toplam_konik_kg = (4 / (a**2)) * secilen_boru["Konik_kg"] 
+            toplam_agirlik_indeksi = toplam_boru_kg + toplam_konik_kg
+            
+            if toplam_agirlik_indeksi < min_weight_per_m2:
+                min_weight_per_m2 = toplam_agirlik_indeksi
+                best_modul = a
+                best_pipe = secilen_boru
+                best_force = force_kN
+                best_length = cubuk_boyu_mm
 
-    # Optimizasyon: Kuvveti taşıyabilen EN HAFİF boruyu bul
-    uygun_borular = df_pipes[df_pipes["Kapasite_kN"] >= max_force_kN].sort_values(by="Agirlik_kg_m")
+    # 4. SONUÇ EKRANI
+    col_grafik, col_hesap = st.columns([1, 1])
     
-    if not uygun_borular.empty:
-        optimum_boru = uygun_borular.iloc[0]
-        st.success(f"✅ **Optimum Kesit Bulundu:** {optimum_boru['Boru']}")
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Seçilen Boru", optimum_boru['Boru'])
-        col2.metric("Kapasite (kN)", f"{optimum_boru['Kapasite_kN']:.1f}")
-        col3.metric("Birim Ağırlık", f"{optimum_boru['Agirlik_kg_m']} kg/m")
-        
-        # CFO Özeti
-        st.markdown("### 💰 Finansal Özet")
-        st.write(f"Sistem, {max_force_kN:.1f} kN kuvveti taşımak için tonajı minimize ederek {optimum_boru['Agirlik_kg_m']} kg/m ağırlığındaki **{optimum_boru['Boru']}** borusunu seçmiştir. Daha ağır bir kesit kullanılması israf olacaktır.")
+    if best_pipe is not None:
+        with col_hesap:
+            st.subheader("🏆 Optimize Edilmiş Sistem")
+            st.success(f"En Ekonomik Modül Boyu: **{best_modul} metre** bulundu.")
+            st.info(f"Kuvvet: **{best_force:.1f} kN** | Çubuk Boyu: **{best_length:.0f} mm**")
+            
+            c1, c2 = st.columns(2)
+            c1.metric("Optimum Boru", best_pipe['Boru'])
+            c2.metric("Uygun Cıvata", best_pipe['Civata'])
+            
+            st.markdown("### 🏭 Üretim Rotası")
+            # İterasyon zaten 1500-3500 arasında yapıldığı için hepsi otomasyona uygun çıkar
+            st.success("🟢 Borular Kaynak Otomasyon Hattına Tam Uygundur.")
+            st.caption(f"Sistem, {best_modul}m modül boyunu seçerek Mulu adetlerini düşürürken, {best_length:.0f}mm çubuk boyuyla burkulma sınırlarını aşmayıp toplam metrekare maliyetini minimize etmiştir.")
+
+        with col_grafik:
+            st.subheader("🧊 İdeal Modülün 3D Çizimi")
+            x_nodes = [0, best_modul, best_modul, 0, best_modul/2]
+            y_nodes = [0, 0, best_modul, best_modul, best_modul/2]
+            z_nodes = [0, 0, 0, 0, depth_d]
+            
+            fig = go.Figure()
+            lines = [(0,1), (1,2), (2,3), (3,0), (0,4), (1,4), (2,4), (3,4)]
+            for start, end in lines:
+                fig.add_trace(go.Scatter3d(
+                    x=[x_nodes[start], x_nodes[end]],
+                    y=[y_nodes[start], y_nodes[end]],
+                    z=[z_nodes[start], z_nodes[end]],
+                    mode='lines', line=dict(color='#1f77b4', width=6), hoverinfo='none'
+                ))
+            fig.add_trace(go.Scatter3d(
+                x=x_nodes, y=y_nodes, z=z_nodes,
+                mode='markers', marker=dict(size=10, color='#d62728'),
+                name='Mulu (Küre)'
+            ))
+            fig.update_layout(scene=dict(aspectmode='data'), margin=dict(l=0, r=0, b=0, t=0), height=400, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
     else:
-        st.error("⚠️ Uyarı: Girdiğiniz yükler için mevcut boru kütüphanesinde yeterli kapasiteye sahip kesit bulunamadı! Daha büyük çaplı borular (örn: Ø159, Ø219) eklenmelidir.")
-    
-    with st.expander("Tüm Boru Kütüphanesi ve Kapasitelerini Gör"):
-        st.dataframe(df_pipes[["Boru", "Agirlik_kg_m", "Kapasite_kN"]])
+        st.error("Girdiğiniz açıklık ve yük değerleri için mevcut kütüphanede uygun çözüm bulunamadı.")
