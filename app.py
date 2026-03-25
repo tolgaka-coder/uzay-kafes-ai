@@ -22,7 +22,7 @@ def check_password():
 
 if check_password():
     st.title("🏗️ Otonom Modül ve Kesit Optimizasyonu")
-    st.markdown("Algoritma, en düşük birim ağırlığı ve uygun üretim rotasını bulmak için tüm modül boylarını (1.5m - 3.5m) iteratif olarak tarar.")
+    st.markdown("Algoritma, en düşük birim ağırlığı bulmak için modül boylarını tarar ve tüm yapının 3D dijital ikizini çizer.")
 
     # 1. BORU VE KONİK KÜTÜPHANESİ
     pipe_data = [
@@ -36,12 +36,11 @@ if check_password():
     ]
     df_pipes = pd.DataFrame(pipe_data)
     
-    # Kapasite ve Atalet Momenti (Burkulma İçin)
     df_pipes["Alan_mm2"] = math.pi * (df_pipes["D"] - df_pipes["t"]) * df_pipes["t"]
     df_pipes["I_mm4"] = (math.pi * (df_pipes["D"]**4 - (df_pipes["D"] - 2*df_pipes["t"])**4)) / 64
     df_pipes["Akma_Kapasitesi_kN"] = (df_pipes["Alan_mm2"] * 235) / 1000
 
-    # 2. KULLANICI GİRDİ PANELİ
+    # 2. GİRDİ PANELİ
     st.sidebar.header("Statik Parametreler")
     span_L = st.sidebar.number_input("Açıklık (L) - metre", min_value=10.0, value=30.0, step=1.0)
     load_Q = st.sidebar.number_input("Toplam Yük - kN/m2", min_value=0.5, value=1.5, step=0.1)
@@ -49,37 +48,29 @@ if check_password():
 
     st.write("---")
     
-    # 3. YAPAY ZEKA İTERASYON MOTORU
+    # 3. İTERASYON MOTORU
     best_modul = None
     min_weight_per_m2 = float('inf')
     best_pipe = None
     best_force = 0
     best_length = 0
     
-    # Modül boyunu 1.5m'den 3.5m'ye kadar 10cm aralıklarla test et (Otomasyon limitleri)
     test_modules = [x / 10.0 for x in range(15, 36)] 
     
     for a in test_modules:
         max_moment = (load_Q * (span_L**2)) / 8
         force_kN = max_moment / depth_d
-        
-        # Çubuk Boyu (mm)
         cubuk_boyu_mm = math.sqrt((a/2)**2 + (a/2)**2 + depth_d**2) * 1000
         
-        # Burkulma ve Kapasite Kontrolü ile Boru Seçimi
         secilen_boru = None
         for index, row in df_pipes.iterrows():
-            # Euler Burkulma Yükü (Ncr) - Basitleştirilmiş
             N_cr = (math.pi**2 * 200000 * row["I_mm4"]) / (cubuk_boyu_mm**2) / 1000
-            Guvenli_Kapasite = min(row["Akma_Kapasitesi_kN"], N_cr / 1.5) # Güvenlik katsayısı 1.5
-            
+            Guvenli_Kapasite = min(row["Akma_Kapasitesi_kN"], N_cr / 1.5)
             if Guvenli_Kapasite >= force_kN:
                 secilen_boru = row
                 break
                 
         if secilen_boru is not None:
-            # m2 başına yaklaşık sistem ağırlığı = Boru Ağırlığı + Konik/Mulu Ağırlığı
-            # (Optimizasyon için basitleştirilmiş indeks değeri)
             boru_uzunluk_m2 = (4/a) + (4 * (cubuk_boyu_mm/1000) / (a**2))
             toplam_boru_kg = boru_uzunluk_m2 * secilen_boru["Agirlik_kg_m"]
             toplam_konik_kg = (4 / (a**2)) * secilen_boru["Konik_kg"] 
@@ -92,10 +83,10 @@ if check_password():
                 best_force = force_kN
                 best_length = cubuk_boyu_mm
 
-    # 4. SONUÇ EKRANI
-    col_grafik, col_hesap = st.columns([1, 1])
-    
+    # 4. SONUÇ VE TÜM ÇATI 3D ÇİZİMİ
     if best_pipe is not None:
+        col_grafik, col_hesap = st.columns([1.5, 1])
+        
         with col_hesap:
             st.subheader("🏆 Optimize Edilmiş Sistem")
             st.success(f"En Ekonomik Modül Boyu: **{best_modul} metre** bulundu.")
@@ -106,31 +97,73 @@ if check_password():
             c2.metric("Uygun Cıvata", best_pipe['Civata'])
             
             st.markdown("### 🏭 Üretim Rotası")
-            # İterasyon zaten 1500-3500 arasında yapıldığı için hepsi otomasyona uygun çıkar
-            st.success("🟢 Borular Kaynak Otomasyon Hattına Tam Uygundur.")
-            st.caption(f"Sistem, {best_modul}m modül boyunu seçerek Mulu adetlerini düşürürken, {best_length:.0f}mm çubuk boyuyla burkulma sınırlarını aşmayıp toplam metrekare maliyetini minimize etmiştir.")
+            st.success("🟢 Borular Kaynak Otomasyon Hattına Uygundur.")
+            st.caption(f"Sistem, {best_modul}m modül boyunu seçerek toplam maliyeti minimize etmiştir. Yandaki 3D model, girdiğiniz {span_L} metrelik açıklığın gerçek ızgara simülasyonudur.")
 
         with col_grafik:
-            st.subheader("🧊 İdeal Modülün 3D Çizimi")
-            x_nodes = [0, best_modul, best_modul, 0, best_modul/2]
-            y_nodes = [0, 0, best_modul, best_modul, best_modul/2]
-            z_nodes = [0, 0, 0, 0, depth_d]
+            st.subheader(f"🧊 Tüm Çatının Dijital İkizi ({span_L}m x {span_L}m)")
+            
+            # Tüm çatıyı kapsayan ağın (Grid) hesabı
+            Nx = max(1, int(span_L / best_modul))
+            Ny = Nx # Kare formlu çatı varsayımı
+            
+            node_x, node_y, node_z = [], [], []
+            bottom_nodes, top_nodes = {}, {}
+            
+            # Alt Mulu noktaları
+            for i in range(Nx + 1):
+                for j in range(Ny + 1):
+                    bottom_nodes[(i, j)] = len(node_x)
+                    node_x.append(i * best_modul)
+                    node_y.append(j * best_modul)
+                    node_z.append(0)
+                    
+            # Üst Mulu noktaları
+            for i in range(Nx):
+                for j in range(Ny):
+                    top_nodes[(i, j)] = len(node_x)
+                    node_x.append(i * best_modul + best_modul/2)
+                    node_y.append(j * best_modul + best_modul/2)
+                    node_z.append(depth_d)
+                    
+            # Çubukların oluşturulması (Sistemi yormamak için ardışık tek çizgi mantığı)
+            line_x, line_y, line_z = [], [], []
+            def add_line(n1, n2):
+                line_x.extend([node_x[n1], node_x[n2], None])
+                line_y.extend([node_y[n1], node_y[n2], None])
+                line_z.extend([node_z[n1], node_z[n2], None])
+                
+            for i in range(Nx + 1):
+                for j in range(Ny + 1):
+                    if i < Nx: add_line(bottom_nodes[(i, j)], bottom_nodes[(i+1, j)])
+                    if j < Ny: add_line(bottom_nodes[(i, j)], bottom_nodes[(i, j+1)])
+            for i in range(Nx):
+                for j in range(Ny):
+                    if i < Nx - 1: add_line(top_nodes[(i, j)], top_nodes[(i+1, j)])
+                    if j < Ny - 1: add_line(top_nodes[(i, j)], top_nodes[(i, j+1)])
+            for i in range(Nx):
+                for j in range(Ny):
+                    tn = top_nodes[(i, j)]
+                    add_line(tn, bottom_nodes[(i, j)])
+                    add_line(tn, bottom_nodes[(i+1, j)])
+                    add_line(tn, bottom_nodes[(i, j+1)])
+                    add_line(tn, bottom_nodes[(i+1, j+1)])
             
             fig = go.Figure()
-            lines = [(0,1), (1,2), (2,3), (3,0), (0,4), (1,4), (2,4), (3,4)]
-            for start, end in lines:
-                fig.add_trace(go.Scatter3d(
-                    x=[x_nodes[start], x_nodes[end]],
-                    y=[y_nodes[start], y_nodes[end]],
-                    z=[z_nodes[start], z_nodes[end]],
-                    mode='lines', line=dict(color='#1f77b4', width=6), hoverinfo='none'
-                ))
+            # Borular
             fig.add_trace(go.Scatter3d(
-                x=x_nodes, y=y_nodes, z=z_nodes,
-                mode='markers', marker=dict(size=10, color='#d62728'),
-                name='Mulu (Küre)'
+                x=line_x, y=line_y, z=line_z,
+                mode='lines', line=dict(color='#1f77b4', width=2), hoverinfo='none'
             ))
-            fig.update_layout(scene=dict(aspectmode='data'), margin=dict(l=0, r=0, b=0, t=0), height=400, showlegend=False)
+            # Mulular
+            fig.add_trace(go.Scatter3d(
+                x=node_x, y=node_y, z=node_z,
+                mode='markers', marker=dict(size=3, color='#d62728')
+            ))
+            fig.update_layout(
+                scene=dict(aspectmode='data', xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False)), 
+                margin=dict(l=0, r=0, b=0, t=0), height=500, showlegend=False
+            )
             st.plotly_chart(fig, use_container_width=True)
     else:
         st.error("Girdiğiniz açıklık ve yük değerleri için mevcut kütüphanede uygun çözüm bulunamadı.")
