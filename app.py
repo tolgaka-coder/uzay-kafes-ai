@@ -21,8 +21,8 @@ def check_password():
     return True
 
 if check_password():
-    st.title("🏗️ Otonom Modül ve Kesit Optimizasyonu")
-    st.markdown("Algoritma, en düşük birim ağırlığı bulmak için modül boylarını tarar ve tüm yapının 3D dijital ikizini çizer.")
+    st.title("🏗️ Otonom Modül, Kesit ve Maliyet Optimizasyonu")
+    st.markdown("Algoritma en düşük ağırlığı bulur, 3D dijital ikizi çizer ve anlık proje bütçesini hesaplar.")
 
     # 1. BORU VE KONİK KÜTÜPHANESİ
     pipe_data = [
@@ -40,11 +40,17 @@ if check_password():
     df_pipes["I_mm4"] = (math.pi * (df_pipes["D"]**4 - (df_pipes["D"] - 2*df_pipes["t"])**4)) / 64
     df_pipes["Akma_Kapasitesi_kN"] = (df_pipes["Alan_mm2"] * 235) / 1000
 
-    # 2. GİRDİ PANELİ
-    st.sidebar.header("Statik Parametreler")
+    # 2. GİRDİ PANELİ (STATİK VE FİNANS)
+    st.sidebar.header("📐 Statik Parametreler")
     span_L = st.sidebar.number_input("Açıklık (L) - metre", min_value=10.0, value=30.0, step=1.0)
     load_Q = st.sidebar.number_input("Toplam Yük - kN/m2", min_value=0.5, value=1.5, step=0.1)
     depth_d = st.sidebar.number_input("Sistem Derinliği (h) - metre", min_value=1.0, value=2.0, step=0.1)
+
+    st.sidebar.markdown("---")
+    st.sidebar.header("💰 Finansal Parametreler")
+    price_steel = st.sidebar.number_input("Boru/Çelik ($/kg)", min_value=0.5, value=1.20, step=0.1)
+    price_mulu = st.sidebar.number_input("Mulu ($/adet)", min_value=5.0, value=18.50, step=0.5)
+    price_labor = st.sidebar.number_input("Otomasyon Kaynak ($/çubuk)", min_value=1.0, value=4.50, step=0.5)
 
     st.write("---")
     
@@ -83,34 +89,66 @@ if check_password():
                 best_force = force_kN
                 best_length = cubuk_boyu_mm
 
-    # 4. SONUÇ VE TÜM ÇATI 3D ÇİZİMİ
+    # 4. SONUÇ, METRAJ VE ÇİZİM
     if best_pipe is not None:
+        
+        # GERÇEK METRAJ HESABI (Tüm Çatı İçin)
+        Nx = max(1, int(span_L / best_modul))
+        Ny = Nx
+        
+        bottom_nodes_count = (Nx + 1) * (Ny + 1)
+        top_nodes_count = Nx * Ny
+        total_mulu_count = bottom_nodes_count + top_nodes_count
+        
+        bottom_chords_count = Nx * (Ny + 1) + Ny * (Nx + 1)
+        top_chords_count = max(0, (Nx - 1) * Ny) + max(0, (Ny - 1) * Nx)
+        diagonal_chords_count = 4 * Nx * Ny
+        total_chords_count = bottom_chords_count + top_chords_count + diagonal_chords_count
+        
+        horizontal_length_m = (bottom_chords_count + top_chords_count) * best_modul
+        diagonal_length_m = diagonal_chords_count * (best_length / 1000.0)
+        total_pipe_length_m = horizontal_length_m + diagonal_length_m
+        
+        total_pipe_weight_kg = total_pipe_length_m * best_pipe["Agirlik_kg_m"]
+        total_conic_weight_kg = (total_chords_count * 2) * best_pipe["Konik_kg"]
+        total_steel_weight_kg = total_pipe_weight_kg + total_conic_weight_kg
+        
+        # MALİYET HESABI
+        cost_steel = total_steel_weight_kg * price_steel
+        cost_mulu = total_mulu_count * price_mulu
+        cost_labor = total_chords_count * price_labor
+        total_project_cost = cost_steel + cost_mulu + cost_labor
+        
         col_grafik, col_hesap = st.columns([1.5, 1])
         
         with col_hesap:
             st.subheader("🏆 Optimize Edilmiş Sistem")
-            st.success(f"En Ekonomik Modül Boyu: **{best_modul} metre** bulundu.")
-            st.info(f"Kuvvet: **{best_force:.1f} kN** | Çubuk Boyu: **{best_length:.0f} mm**")
+            st.success(f"En Ekonomik Modül Boyu: **{best_modul} metre**")
             
             c1, c2 = st.columns(2)
             c1.metric("Optimum Boru", best_pipe['Boru'])
             c2.metric("Uygun Cıvata", best_pipe['Civata'])
             
+            # CANLI MALİYET PANELİ
+            st.markdown("### 📊 Proje Metrajı ve Maliyet")
+            metraj_df = pd.DataFrame({
+                "Kalem": ["Toplam Çelik Tonajı", "Toplam Mulu (Küre)", "Toplam Çubuk (Kaynak)"],
+                "Miktar": [f"{total_steel_weight_kg/1000:.1f} Ton", f"{total_mulu_count} Adet", f"{total_chords_count} Adet"],
+                "Tutar": [f"${cost_steel:,.0f}", f"${cost_mulu:,.0f}", f"${cost_labor:,.0f}"]
+            })
+            st.table(metraj_df.set_index("Kalem"))
+            
+            st.info(f"💰 **Toplam Tahmini Üretim Maliyeti: ${total_project_cost:,.0f}**")
+            
             st.markdown("### 🏭 Üretim Rotası")
-            st.success("🟢 Borular Kaynak Otomasyon Hattına Uygundur.")
-            st.caption(f"Sistem, {best_modul}m modül boyunu seçerek toplam maliyeti minimize etmiştir. Yandaki 3D model, girdiğiniz {span_L} metrelik açıklığın gerçek ızgara simülasyonudur.")
+            st.success("🟢 Tüm borular kaynak otomasyon limitlerindedir (1.5m - 3.5m).")
 
         with col_grafik:
             st.subheader(f"🧊 Tüm Çatının Dijital İkizi ({span_L}m x {span_L}m)")
             
-            # Tüm çatıyı kapsayan ağın (Grid) hesabı
-            Nx = max(1, int(span_L / best_modul))
-            Ny = Nx # Kare formlu çatı varsayımı
-            
             node_x, node_y, node_z = [], [], []
             bottom_nodes, top_nodes = {}, {}
             
-            # Alt Mulu noktaları
             for i in range(Nx + 1):
                 for j in range(Ny + 1):
                     bottom_nodes[(i, j)] = len(node_x)
@@ -118,7 +156,6 @@ if check_password():
                     node_y.append(j * best_modul)
                     node_z.append(0)
                     
-            # Üst Mulu noktaları
             for i in range(Nx):
                 for j in range(Ny):
                     top_nodes[(i, j)] = len(node_x)
@@ -126,7 +163,6 @@ if check_password():
                     node_y.append(j * best_modul + best_modul/2)
                     node_z.append(depth_d)
                     
-            # Çubukların oluşturulması (Sistemi yormamak için ardışık tek çizgi mantığı)
             line_x, line_y, line_z = [], [], []
             def add_line(n1, n2):
                 line_x.extend([node_x[n1], node_x[n2], None])
@@ -150,12 +186,10 @@ if check_password():
                     add_line(tn, bottom_nodes[(i+1, j+1)])
             
             fig = go.Figure()
-            # Borular
             fig.add_trace(go.Scatter3d(
                 x=line_x, y=line_y, z=line_z,
                 mode='lines', line=dict(color='#1f77b4', width=2), hoverinfo='none'
             ))
-            # Mulular
             fig.add_trace(go.Scatter3d(
                 x=node_x, y=node_y, z=node_z,
                 mode='markers', marker=dict(size=3, color='#d62728')
