@@ -41,10 +41,11 @@ if check_password():
     df_pipes["Akma_Kapasitesi_kN"] = (df_pipes["Alan_mm2"] * 235) / 1000
 
     # 2. GİRDİ PANELİ (STATİK VE FİNANS)
-    st.sidebar.header("📐 Statik Parametreler")
-    span_L = st.sidebar.number_input("Açıklık (L) - metre", min_value=10.0, value=30.0, step=1.0)
-    load_Q = st.sidebar.number_input("Toplam Yük - kN/m2", min_value=0.5, value=1.5, step=0.1)
+    st.sidebar.header("📐 Geometri & Yükler")
+    span_L = st.sidebar.number_input("Açıklık/Boy (L) - metre", min_value=10.0, value=30.0, step=1.0)
+    width_W = st.sidebar.number_input("Genişlik (W) - metre", min_value=10.0, value=20.0, step=1.0) # YENİ GİRDİ
     depth_d = st.sidebar.number_input("Sistem Derinliği (h) - metre", min_value=1.0, value=2.0, step=0.1)
+    load_Q = st.sidebar.number_input("Toplam Yük - kN/m2", min_value=0.5, value=1.5, step=0.1)
 
     st.sidebar.markdown("---")
     st.sidebar.header("💰 Finansal Parametreler")
@@ -64,7 +65,7 @@ if check_password():
     test_modules = [x / 10.0 for x in range(15, 36)] 
     
     for a in test_modules:
-        max_moment = (load_Q * (span_L**2)) / 8
+        max_moment = (load_Q * (span_L**2)) / 8 # Moment hesabı açıklığa (L) göre yapılır
         force_kN = max_moment / depth_d
         cubuk_boyu_mm = math.sqrt((a/2)**2 + (a/2)**2 + depth_d**2) * 1000
         
@@ -92,9 +93,9 @@ if check_password():
     # 4. SONUÇ, METRAJ VE ÇİZİM
     if best_pipe is not None:
         
-        # GERÇEK METRAJ HESABI (Tüm Çatı İçin)
-        Nx = max(1, int(span_L / best_modul))
-        Ny = Nx
+        # GERÇEK METRAJ HESABI (DİKDÖRTGEN ÇATI İÇİN GÜNCELLENDİ)
+        Nx = max(1, int(span_L / best_modul)) # Boy yönündeki modül sayısı
+        Ny = max(1, int(width_W / best_modul)) # En yönündeki modül sayısı
         
         bottom_nodes_count = (Nx + 1) * (Ny + 1)
         top_nodes_count = Nx * Ny
@@ -109,15 +110,22 @@ if check_password():
         diagonal_length_m = diagonal_chords_count * (best_length / 1000.0)
         total_pipe_length_m = horizontal_length_m + diagonal_length_m
         
+        # Uzay Kafes Çelik Tonajı
         total_pipe_weight_kg = total_pipe_length_m * best_pipe["Agirlik_kg_m"]
         total_conic_weight_kg = (total_chords_count * 2) * best_pipe["Konik_kg"]
         total_steel_weight_kg = total_pipe_weight_kg + total_conic_weight_kg
         
+        # Aşık (Purlin) Hesabı
+        purlin_length_m = top_nodes_count * best_modul # Basitleştirilmiş aşık metrajı (Y ekseni boyunca)
+        purlin_weight_kg_m = 5.0 # Yaklaşık 5 kg/m'lik bir kutu profil varsayımı
+        total_purlin_weight_kg = purlin_length_m * purlin_weight_kg_m
+        
         # MALİYET HESABI
         cost_steel = total_steel_weight_kg * price_steel
+        cost_purlin = total_purlin_weight_kg * price_steel # Aşıklar da çelik fiyatından hesaplanıyor
         cost_mulu = total_mulu_count * price_mulu
         cost_labor = total_chords_count * price_labor
-        total_project_cost = cost_steel + cost_mulu + cost_labor
+        total_project_cost = cost_steel + cost_purlin + cost_mulu + cost_labor
         
         col_grafik, col_hesap = st.columns([1.5, 1])
         
@@ -132,23 +140,21 @@ if check_password():
             # CANLI MALİYET PANELİ
             st.markdown("### 📊 Proje Metrajı ve Maliyet")
             metraj_df = pd.DataFrame({
-                "Kalem": ["Toplam Çelik Tonajı", "Toplam Mulu (Küre)", "Toplam Çubuk (Kaynak)"],
-                "Miktar": [f"{total_steel_weight_kg/1000:.1f} Ton", f"{total_mulu_count} Adet", f"{total_chords_count} Adet"],
-                "Tutar": [f"${cost_steel:,.0f}", f"${cost_mulu:,.0f}", f"${cost_labor:,.0f}"]
+                "Kalem": ["Uzay Kafes Çeliği", "Aşık Çeliği (Purlins)", "Mulu (Küre)", "Kaynak/İmalat"],
+                "Miktar": [f"{total_steel_weight_kg/1000:.1f} Ton", f"{total_purlin_weight_kg/1000:.1f} Ton", f"{total_mulu_count} Adet", f"{total_chords_count} Adet"],
+                "Tutar": [f"${cost_steel:,.0f}", f"${cost_purlin:,.0f}", f"${cost_mulu:,.0f}", f"${cost_labor:,.0f}"]
             })
             st.table(metraj_df.set_index("Kalem"))
             
             st.info(f"💰 **Toplam Tahmini Üretim Maliyeti: ${total_project_cost:,.0f}**")
-            
-            st.markdown("### 🏭 Üretim Rotası")
-            st.success("🟢 Tüm borular kaynak otomasyon limitlerindedir (1.5m - 3.5m).")
 
         with col_grafik:
-            st.subheader(f"🧊 Tüm Çatının Dijital İkizi ({span_L}m x {span_L}m)")
+            st.subheader(f"🧊 Dijital İkiz ({span_L}m x {width_W}m)")
             
             node_x, node_y, node_z = [], [], []
             bottom_nodes, top_nodes = {}, {}
             
+            # Alt Noktalar
             for i in range(Nx + 1):
                 for j in range(Ny + 1):
                     bottom_nodes[(i, j)] = len(node_x)
@@ -156,6 +162,7 @@ if check_password():
                     node_y.append(j * best_modul)
                     node_z.append(0)
                     
+            # Üst Noktalar
             for i in range(Nx):
                 for j in range(Ny):
                     top_nodes[(i, j)] = len(node_x)
@@ -164,10 +171,17 @@ if check_password():
                     node_z.append(depth_d)
                     
             line_x, line_y, line_z = [], [], []
-            def add_line(n1, n2):
-                line_x.extend([node_x[n1], node_x[n2], None])
-                line_y.extend([node_y[n1], node_y[n2], None])
-                line_z.extend([node_z[n1], node_z[n2], None])
+            purlin_x, purlin_y, purlin_z = [], [], [] # Aşıklar için yeni liste
+            
+            def add_line(n1, n2, is_purlin=False):
+                if is_purlin:
+                    purlin_x.extend([node_x[n1], node_x[n2], None])
+                    purlin_y.extend([node_y[n1], node_y[n2], None])
+                    purlin_z.extend([node_z[n1], node_z[n2], None])
+                else:
+                    line_x.extend([node_x[n1], node_x[n2], None])
+                    line_y.extend([node_y[n1], node_y[n2], None])
+                    line_z.extend([node_z[n1], node_z[n2], None])
                 
             for i in range(Nx + 1):
                 for j in range(Ny + 1):
@@ -177,6 +191,9 @@ if check_password():
                 for j in range(Ny):
                     if i < Nx - 1: add_line(top_nodes[(i, j)], top_nodes[(i+1, j)])
                     if j < Ny - 1: add_line(top_nodes[(i, j)], top_nodes[(i, j+1)])
+                    # Y ekseni boyunca AŞIK (Purlin) Çizimi (Sadece üst düğümlerden geçer)
+                    if j < Ny - 1: add_line(top_nodes[(i, j)], top_nodes[(i, j+1)], is_purlin=True)
+                    
             for i in range(Nx):
                 for j in range(Ny):
                     tn = top_nodes[(i, j)]
@@ -186,18 +203,25 @@ if check_password():
                     add_line(tn, bottom_nodes[(i+1, j+1)])
             
             fig = go.Figure()
+            # Uzay Kafes Boruları (Mavi)
             fig.add_trace(go.Scatter3d(
                 x=line_x, y=line_y, z=line_z,
-                mode='lines', line=dict(color='#1f77b4', width=2), hoverinfo='none'
+                mode='lines', line=dict(color='#1f77b4', width=2), name='Boru'
             ))
+            # Aşıklar - Purlins (Yeşil)
+            fig.add_trace(go.Scatter3d(
+                x=purlin_x, y=purlin_y, z=purlin_z,
+                mode='lines', line=dict(color='#2ca02c', width=4), name='Aşık'
+            ))
+            # Mulular (Kırmızı)
             fig.add_trace(go.Scatter3d(
                 x=node_x, y=node_y, z=node_z,
-                mode='markers', marker=dict(size=3, color='#d62728')
+                mode='markers', marker=dict(size=3, color='#d62728'), name='Mulu'
             ))
             fig.update_layout(
                 scene=dict(aspectmode='data', xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False)), 
-                margin=dict(l=0, r=0, b=0, t=0), height=500, showlegend=False
+                margin=dict(l=0, r=0, b=0, t=0), height=500, showlegend=True
             )
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.error("Girdiğiniz açıklık ve yük değerleri için mevcut kütüphanede uygun çözüm bulunamadı.")
+        st.error("Girdiğiniz değerler için kütüphanede uygun çözüm bulunamadı.")
