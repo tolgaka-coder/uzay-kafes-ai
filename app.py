@@ -74,19 +74,17 @@ if check_password():
             Ncr = (math.pi**2 * 200000 * r["I_mm4"]) / (length_mm**2) / 1000
             if min(r["Akma_Kapasitesi_kN"], Ncr / 1.5) >= force:
                 return r
-        return df_pipes.iloc[-1] # Kurtarmazsa en kalını seç
+        return df_pipes.iloc[-1] 
     
     for a in test_modules:
         max_moment = (load_Q * (span_L**2)) / 8
         max_force = max_moment / depth_d
         cubuk_boyu_mm = math.sqrt((a/2)**2 + (a/2)**2 + depth_d**2) * 1000
         
-        # 3 Farklı Gerilme Bölgesi
-        pipe_z1 = get_optimum_pipe(max_force, cubuk_boyu_mm)          # %100 Yük (Kritik Merkez)
-        pipe_z2 = get_optimum_pipe(max_force * 0.65, cubuk_boyu_mm)   # %65 Yük (Orta Kısımlar)
-        pipe_z3 = get_optimum_pipe(max_force * 0.35, cubuk_boyu_mm)   # %35 Yük (Kenar ve Köşeler)
+        pipe_z1 = get_optimum_pipe(max_force, cubuk_boyu_mm)          
+        pipe_z2 = get_optimum_pipe(max_force * 0.65, cubuk_boyu_mm)   
+        pipe_z3 = get_optimum_pipe(max_force * 0.35, cubuk_boyu_mm)   
         
-        # Ortalama Ağırlık Dağılımı (Z1: %30, Z2: %40, Z3: %30 parça oranı)
         avg_kg_m = (pipe_z1["Agirlik_kg_m"] * 0.30) + (pipe_z2["Agirlik_kg_m"] * 0.40) + (pipe_z3["Agirlik_kg_m"] * 0.30)
         avg_konik = (pipe_z1["Konik_kg"] * 0.30) + (pipe_z2["Konik_kg"] * 0.40) + (pipe_z3["Konik_kg"] * 0.30)
         
@@ -102,6 +100,7 @@ if check_password():
     if best_z1 is not None:
         Nx = max(1, int(span_L / best_modul))
         Ny = max(1, int(width_W / best_modul))
+        grid_L = Nx * best_modul # EKSİK OLAN VE HATAYA SEBEP OLAN DEĞİŞKEN EKLENDİ
         
         bottom_nodes_count = (Nx + 1) * (Ny + 1)
         top_nodes_count = Nx * Ny
@@ -112,7 +111,6 @@ if check_password():
         diagonal_chords_count = 4 * Nx * Ny
         total_chords_count = bottom_chords_count + top_chords_count + diagonal_chords_count
         
-        # ZONAL METRAJ HESABI (3 Bölge Dağılımı)
         z1_count = int(total_chords_count * 0.30)
         z2_count = int(total_chords_count * 0.40)
         z3_count = total_chords_count - z1_count - z2_count
@@ -126,8 +124,7 @@ if check_password():
         weight_z3 = (total_len_m * 0.30 * best_z3["Agirlik_kg_m"]) + (z3_count * 2 * best_z3["Konik_kg"])
         total_steel_weight_kg = weight_z1 + weight_z2 + weight_z3
         
-        # İkincil Çelik (Dikme ve Aşık)
-        total_standoff_length_m = sum([0.20 + (min((i * best_modul + best_modul/2), (Nx * best_modul) - (i * best_modul + best_modul/2)) * (roof_slope / 100.0)) if cati_formu == "Düz / Beşik" else 0.20 for i in range(Nx) for j in range(Ny)])
+        total_standoff_length_m = sum([0.20 + (min((i * best_modul + best_modul/2), grid_L - (i * best_modul + best_modul/2)) * (roof_slope / 100.0)) if cati_formu == "Düz / Beşik" else 0.20 for i in range(Nx) for j in range(Ny)])
         total_secondary_steel_kg = (total_standoff_length_m * 5.0) + ((top_nodes_count * best_modul) * 5.0)
         
         total_project_cost = (total_steel_weight_kg * price_steel) + (total_secondary_steel_kg * price_steel) + (total_kure_count * price_kure) + (total_chords_count * price_labor)
@@ -138,11 +135,11 @@ if check_password():
             st.subheader("🏆 Zonal Optimizasyon Sonucu")
             st.success(f"İdeal Modül Boyu: **{best_modul} metre**")
             
-            st.markdown("#### 🏭 Fabrika Üretim Grupları (Bölgeler)")
+            st.markdown("#### 🏭 Fabrika Üretim Grupları")
             z_df = pd.DataFrame({
-                "Bölge (Zon)": ["Zon 1 (Ağır Yük)", "Zon 2 (Orta Yük)", "Zon 3 (Hafif Yük)"],
-                "Seçilen Boru": [best_z1['Boru'], best_z2['Boru'], best_z3['Boru']],
-                "Kullanım Oranı": ["%30", "%40", "%30"]
+                "Bölge (Zon)": ["Zon 1 (Ağır)", "Zon 2 (Orta)", "Zon 3 (Hafif)"],
+                "Boru Tipi": [best_z1['Boru'], best_z2['Boru'], best_z3['Boru']],
+                "Kullanım": ["%30", "%40", "%30"]
             })
             st.table(z_df.set_index("Bölge (Zon)"))
             
@@ -155,15 +152,14 @@ if check_password():
             st.table(metraj_df.set_index("Kalem"))
             st.info(f"💰 **Toplam Tahmini Bütçe: ${total_project_cost:,.0f}**")
             
-            # ZONAL İŞ EMRİ
-            st.markdown("### 📥 Otomasyon İş Emri (3 Zonlu)")
+            st.markdown("### 📥 Otomasyon İş Emri")
             wo_data = []
-            for _ in range(z1_count): wo_data.append({"Bölge": "Zon 1 (Merkez/Mesnet)", "Parça Tipi": "Çubuk", "Boy (mm)": int(best_length), "Boru": best_z1['Boru'], "Konik": best_z1['Konik'], "Civata": best_z1['Civata']})
-            for _ in range(z2_count): wo_data.append({"Bölge": "Zon 2 (Geçiş)", "Parça Tipi": "Çubuk", "Boy (mm)": int(best_length), "Boru": best_z2['Boru'], "Konik": best_z2['Konik'], "Civata": best_z2['Civata']})
-            for _ in range(z3_count): wo_data.append({"Bölge": "Zon 3 (Kenar/Köşe)", "Parça Tipi": "Çubuk", "Boy (mm)": int(best_length), "Boru": best_z3['Boru'], "Konik": best_z3['Konik'], "Civata": best_z3['Civata']})
+            for _ in range(z1_count): wo_data.append({"Bölge": "Zon 1 (Merkez)", "Parça": "Çubuk", "Boy (mm)": int(best_length), "Boru": best_z1['Boru'], "Konik": best_z1['Konik'], "Civata": best_z1['Civata']})
+            for _ in range(z2_count): wo_data.append({"Bölge": "Zon 2 (Geçiş)", "Parça": "Çubuk", "Boy (mm)": int(best_length), "Boru": best_z2['Boru'], "Konik": best_z2['Konik'], "Civata": best_z2['Civata']})
+            for _ in range(z3_count): wo_data.append({"Bölge": "Zon 3 (Kenar)", "Parça": "Çubuk", "Boy (mm)": int(best_length), "Boru": best_z3['Boru'], "Konik": best_z3['Konik'], "Civata": best_z3['Civata']})
             
             csv = pd.DataFrame(wo_data).to_csv(index=False).encode('utf-8')
-            st.download_button(label="📥 İmalat İş Emrini İndir (CSV)", data=csv, file_name=f'Altinyaldiz_Zonal_Is_Emri_{span_L}x{width_W}.csv', mime='text/csv', use_container_width=True)
+            st.download_button(label="📥 İmalat İş Emrini İndir (CSV)", data=csv, file_name=f'Altinyaldiz_Zonal_{span_L}x{width_W}.csv', mime='text/csv', use_container_width=True)
 
         with col_grafik:
             st.subheader(f"🧊 {cati_formu} ({span_L}m x {width_W}m)")
