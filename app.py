@@ -48,7 +48,6 @@ if check_password():
     width_W = st.sidebar.number_input("Genişlik (Y Eksen) - m", min_value=10.0, value=20.0, step=1.0)
     depth_d = st.sidebar.number_input("Sistem Derinliği (h) - m", min_value=1.0, value=2.0, step=0.1)
     
-    # Seçilen forma göre özel parametreler
     if cati_formu == "Düz / Beşik":
         roof_slope = st.sidebar.number_input("Çatı Eğimi (%)", min_value=0.0, value=5.0, step=1.0)
         arch_rise = 0.0
@@ -111,7 +110,6 @@ if check_password():
         diagonal_length_m = diagonal_chords_count * (best_length / 1000.0)
         total_steel_weight_kg = ((horizontal_length_m + diagonal_length_m) * best_pipe["Agirlik_kg_m"]) + ((total_chords_count * 2) * best_pipe["Konik_kg"])
         
-        # Geometrik Z-Offset (Yükseklik) Fonksiyonu
         def get_z_offset(x, y):
             if cati_formu == "Düz / Beşik":
                 return 0
@@ -120,7 +118,6 @@ if check_password():
             elif cati_formu == "Kubbe":
                 return arch_rise * math.sin(math.pi * x / span_L) * math.sin(math.pi * y / width_W)
 
-        # Dikme ve Aşık Hesabı
         total_standoff_length_m = 0
         for i in range(Nx):
             for j in range(Ny):
@@ -128,11 +125,10 @@ if check_password():
                 if cati_formu == "Düz / Beşik":
                     standoff_h = 0.20 + (min(tx, grid_L - tx) * (roof_slope / 100.0))
                 else:
-                    standoff_h = 0.20 # Tonoz/Kubbe için standart dikme
+                    standoff_h = 0.20
                 total_standoff_length_m += standoff_h
                 
         total_secondary_steel_kg = (total_standoff_length_m * 5.0) + ((top_nodes_count * best_modul) * 5.0)
-        
         total_project_cost = (total_steel_weight_kg * price_steel) + (total_secondary_steel_kg * price_steel) + (total_kure_count * price_kure) + (total_chords_count * price_labor)
         
         col_grafik, col_hesap = st.columns([1.5, 1])
@@ -154,9 +150,8 @@ if check_password():
             st.table(metraj_df.set_index("Kalem"))
             st.info(f"💰 **Toplam Tahmini Bütçe: ${total_project_cost:,.0f}**")
             
-            # İŞ EMRİ OLUŞTURMA VE İNDİRME BUTONU
             st.markdown("### 🏭 Kaynak Otomasyon İş Emri")
-            st.caption("Aşağıdaki buton ile hesaplanan tüm boruların kesim ve imalat verilerini Excel/CSV formatında fabrikaya gönderebilirsiniz.")
+            st.caption("Aşağıdaki buton ile hesaplanan tüm boruların kesim ve imalat verilerini CSV formatında fabrikaya gönderebilirsiniz.")
             
             wo_data = []
             for _ in range(bottom_chords_count + top_chords_count):
@@ -210,8 +205,13 @@ if check_password():
                     if i < Nx - 1: add_line(top_nodes[(i, j)], top_nodes[(i+1, j)], line_x, line_y, line_z)
                     if j < Ny - 1: add_line(top_nodes[(i, j)], top_nodes[(i, j+1)], line_x, line_y, line_z)
                     
+                    # DÜZELTİLEN KISIM: Her bir düğüm için kendi güncel koordinatını alıyoruz!
+                    curr_node_idx = top_nodes[(i, j)]
+                    ctx, cty, ctz = node_x[curr_node_idx], node_y[curr_node_idx], node_z[curr_node_idx]
+                    
                     px1, py1, pz1 = purlin_nodes[(i, j)]
-                    s_line_x.extend([tx, px1, None]); s_line_y.extend([ty, py1, None]); s_line_z.extend([tz, pz1, None])
+                    s_line_x.extend([ctx, px1, None]); s_line_y.extend([cty, py1, None]); s_line_z.extend([ctz, pz1, None])
+                    
                     if j < Ny - 1:
                         px2, py2, pz2 = purlin_nodes[(i, j+1)]
                         p_line_x.extend([px1, px2, None]); p_line_y.extend([py1, py2, None]); p_line_z.extend([pz1, pz2, None])
