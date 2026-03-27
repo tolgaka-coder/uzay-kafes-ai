@@ -22,10 +22,10 @@ def check_password():
 
 if check_password():
     st.title("🏗️ Altınyaldız Uluslararası Uzay Sistem A.Ş.")
-    st.markdown("### Otonom Statik, Maliyet ve İş Emri Motoru")
-    st.markdown("Algoritma en düşük ağırlığı bulur, seçilen çatı formunun dijital ikizini çizer ve kaynak otomasyonu için iş emri üretir.")
+    st.markdown("### Otonom Statik, Zonal Maliyet ve İş Emri Motoru")
+    st.markdown("Algoritma üretim hızını düşürmeden çelik tonajını minimize etmek için çatıyı **3 Farklı Gerilme Bölgesine (Zonal)** ayırır.")
 
-    # 1. BORU VE KONİK KÜTÜPHANESİ
+    # 1. BORU KÜTÜPHANESİ
     pipe_data = [
         {"Boru": "42.4x2.5", "D": 42.4, "t": 2.5, "Agirlik_kg_m": 2.46, "Konik": "42.4 Konik", "Civata": "M12", "Konik_kg": 0.13},
         {"Boru": "48.3x2.5", "D": 48.3, "t": 2.5, "Agirlik_kg_m": 2.82, "Konik": "48.3 Konik", "Civata": "M12", "Konik_kg": 0.18},
@@ -36,7 +36,6 @@ if check_password():
         {"Boru": "139.7x5.0", "D": 139.7, "t": 5.0, "Agirlik_kg_m": 16.60, "Konik": "139.7 Konik", "Civata": "M36", "Konik_kg": 2.95}
     ]
     df_pipes = pd.DataFrame(pipe_data)
-    
     df_pipes["Alan_mm2"] = math.pi * (df_pipes["D"] - df_pipes["t"]) * df_pipes["t"]
     df_pipes["I_mm4"] = (math.pi * (df_pipes["D"]**4 - (df_pipes["D"] - 2*df_pipes["t"])**4)) / 64
     df_pipes["Akma_Kapasitesi_kN"] = (df_pipes["Alan_mm2"] * 235) / 1000
@@ -45,7 +44,7 @@ if check_password():
     st.sidebar.header("📐 Geometri & Yükler")
     cati_formu = st.sidebar.selectbox("Çatı Formu", ["Düz / Beşik", "Tonoz", "Kubbe"])
     span_L = st.sidebar.number_input("Açıklık (X Eksen) - m", min_value=10.0, value=30.0, step=1.0)
-    width_W = st.sidebar.number_input("Genişlik (Y Eksen) - m", min_value=10.0, value=20.0, step=1.0)
+    width_W = st.sidebar.number_input("Genişlik (Y Eksen) - m", min_value=10.0, value=30.0, step=1.0)
     depth_d = st.sidebar.number_input("Sistem Derinliği (h) - m", min_value=1.0, value=2.0, step=0.1)
     
     if cati_formu == "Düz / Beşik":
@@ -63,39 +62,46 @@ if check_password():
     price_kure = st.sidebar.number_input("Küre ($/adet)", min_value=5.0, value=18.50, step=0.5)
     price_labor = st.sidebar.number_input("Otomasyon Kaynak ($/çubuk)", min_value=1.0, value=4.50, step=0.5)
 
-    st.write("---")
+    # 3. ZONAL İTERASYON MOTORU
+    best_modul, min_weight_per_m2 = None, float('inf')
+    best_z1, best_z2, best_z3 = None, None, None
+    best_length = 0
     
-    # 3. İTERASYON MOTORU
-    best_modul, min_weight_per_m2, best_pipe, best_force, best_length = None, float('inf'), None, 0, 0
     test_modules = [x / 10.0 for x in range(15, 36)] 
+    
+    def get_optimum_pipe(force, length_mm):
+        for idx, r in df_pipes.iterrows():
+            Ncr = (math.pi**2 * 200000 * r["I_mm4"]) / (length_mm**2) / 1000
+            if min(r["Akma_Kapasitesi_kN"], Ncr / 1.5) >= force:
+                return r
+        return df_pipes.iloc[-1] # Kurtarmazsa en kalını seç
     
     for a in test_modules:
         max_moment = (load_Q * (span_L**2)) / 8
-        force_kN = max_moment / depth_d
+        max_force = max_moment / depth_d
         cubuk_boyu_mm = math.sqrt((a/2)**2 + (a/2)**2 + depth_d**2) * 1000
         
-        secilen_boru = None
-        for index, row in df_pipes.iterrows():
-            N_cr = (math.pi**2 * 200000 * row["I_mm4"]) / (cubuk_boyu_mm**2) / 1000
-            Guvenli_Kapasite = min(row["Akma_Kapasitesi_kN"], N_cr / 1.5)
-            if Guvenli_Kapasite >= force_kN:
-                secilen_boru = row
-                break
-                
-        if secilen_boru is not None:
-            boru_uzunluk_m2 = (4/a) + (4 * (cubuk_boyu_mm/1000) / (a**2))
-            toplam_boru_kg = boru_uzunluk_m2 * secilen_boru["Agirlik_kg_m"]
-            toplam_konik_kg = (4 / (a**2)) * secilen_boru["Konik_kg"] 
-            toplam_agirlik_indeksi = toplam_boru_kg + toplam_konik_kg
-            
-            if toplam_agirlik_indeksi < min_weight_per_m2:
-                min_weight_per_m2, best_modul, best_pipe, best_force, best_length = toplam_agirlik_indeksi, a, secilen_boru, force_kN, cubuk_boyu_mm
+        # 3 Farklı Gerilme Bölgesi
+        pipe_z1 = get_optimum_pipe(max_force, cubuk_boyu_mm)          # %100 Yük (Kritik Merkez)
+        pipe_z2 = get_optimum_pipe(max_force * 0.65, cubuk_boyu_mm)   # %65 Yük (Orta Kısımlar)
+        pipe_z3 = get_optimum_pipe(max_force * 0.35, cubuk_boyu_mm)   # %35 Yük (Kenar ve Köşeler)
+        
+        # Ortalama Ağırlık Dağılımı (Z1: %30, Z2: %40, Z3: %30 parça oranı)
+        avg_kg_m = (pipe_z1["Agirlik_kg_m"] * 0.30) + (pipe_z2["Agirlik_kg_m"] * 0.40) + (pipe_z3["Agirlik_kg_m"] * 0.30)
+        avg_konik = (pipe_z1["Konik_kg"] * 0.30) + (pipe_z2["Konik_kg"] * 0.40) + (pipe_z3["Konik_kg"] * 0.30)
+        
+        boru_uzunluk_m2 = (4/a) + (4 * (cubuk_boyu_mm/1000) / (a**2))
+        toplam_agirlik_indeksi = (boru_uzunluk_m2 * avg_kg_m) + ((4 / (a**2)) * avg_konik)
+        
+        if toplam_agirlik_indeksi < min_weight_per_m2:
+            min_weight_per_m2 = toplam_agirlik_indeksi
+            best_modul, best_length = a, cubuk_boyu_mm
+            best_z1, best_z2, best_z3 = pipe_z1, pipe_z2, pipe_z3
 
-    # 4. SONUÇ VE DİJİTAL İKİZ
-    if best_pipe is not None:
+    # 4. SONUÇ VE İŞ EMRİ
+    if best_z1 is not None:
         Nx = max(1, int(span_L / best_modul))
         Ny = max(1, int(width_W / best_modul))
-        grid_L = Nx * best_modul
         
         bottom_nodes_count = (Nx + 1) * (Ny + 1)
         top_nodes_count = Nx * Ny
@@ -106,69 +112,58 @@ if check_password():
         diagonal_chords_count = 4 * Nx * Ny
         total_chords_count = bottom_chords_count + top_chords_count + diagonal_chords_count
         
+        # ZONAL METRAJ HESABI (3 Bölge Dağılımı)
+        z1_count = int(total_chords_count * 0.30)
+        z2_count = int(total_chords_count * 0.40)
+        z3_count = total_chords_count - z1_count - z2_count
+        
         horizontal_length_m = (bottom_chords_count + top_chords_count) * best_modul
         diagonal_length_m = diagonal_chords_count * (best_length / 1000.0)
-        total_steel_weight_kg = ((horizontal_length_m + diagonal_length_m) * best_pipe["Agirlik_kg_m"]) + ((total_chords_count * 2) * best_pipe["Konik_kg"])
+        total_len_m = horizontal_length_m + diagonal_length_m
         
-        def get_z_offset(x, y):
-            if cati_formu == "Düz / Beşik":
-                return 0
-            elif cati_formu == "Tonoz":
-                return arch_rise * math.sin(math.pi * x / span_L)
-            elif cati_formu == "Kubbe":
-                return arch_rise * math.sin(math.pi * x / span_L) * math.sin(math.pi * y / width_W)
-
-        total_standoff_length_m = 0
-        for i in range(Nx):
-            for j in range(Ny):
-                tx = i * best_modul + best_modul/2
-                if cati_formu == "Düz / Beşik":
-                    standoff_h = 0.20 + (min(tx, grid_L - tx) * (roof_slope / 100.0))
-                else:
-                    standoff_h = 0.20
-                total_standoff_length_m += standoff_h
-                
+        weight_z1 = (total_len_m * 0.30 * best_z1["Agirlik_kg_m"]) + (z1_count * 2 * best_z1["Konik_kg"])
+        weight_z2 = (total_len_m * 0.40 * best_z2["Agirlik_kg_m"]) + (z2_count * 2 * best_z2["Konik_kg"])
+        weight_z3 = (total_len_m * 0.30 * best_z3["Agirlik_kg_m"]) + (z3_count * 2 * best_z3["Konik_kg"])
+        total_steel_weight_kg = weight_z1 + weight_z2 + weight_z3
+        
+        # İkincil Çelik (Dikme ve Aşık)
+        total_standoff_length_m = sum([0.20 + (min((i * best_modul + best_modul/2), (Nx * best_modul) - (i * best_modul + best_modul/2)) * (roof_slope / 100.0)) if cati_formu == "Düz / Beşik" else 0.20 for i in range(Nx) for j in range(Ny)])
         total_secondary_steel_kg = (total_standoff_length_m * 5.0) + ((top_nodes_count * best_modul) * 5.0)
+        
         total_project_cost = (total_steel_weight_kg * price_steel) + (total_secondary_steel_kg * price_steel) + (total_kure_count * price_kure) + (total_chords_count * price_labor)
         
         col_grafik, col_hesap = st.columns([1.5, 1])
         
         with col_hesap:
-            st.subheader("🏆 Optimize Edilmiş Sistem")
-            st.success(f"En Ekonomik Modül Boyu: **{best_modul} metre**")
+            st.subheader("🏆 Zonal Optimizasyon Sonucu")
+            st.success(f"İdeal Modül Boyu: **{best_modul} metre**")
             
-            c1, c2 = st.columns(2)
-            c1.metric("Optimum Boru", best_pipe['Boru'])
-            c2.metric("Uygun Cıvata", best_pipe['Civata'])
+            st.markdown("#### 🏭 Fabrika Üretim Grupları (Bölgeler)")
+            z_df = pd.DataFrame({
+                "Bölge (Zon)": ["Zon 1 (Ağır Yük)", "Zon 2 (Orta Yük)", "Zon 3 (Hafif Yük)"],
+                "Seçilen Boru": [best_z1['Boru'], best_z2['Boru'], best_z3['Boru']],
+                "Kullanım Oranı": ["%30", "%40", "%30"]
+            })
+            st.table(z_df.set_index("Bölge (Zon)"))
             
             st.markdown("### 📊 Proje Metrajı ve Maliyet")
             metraj_df = pd.DataFrame({
-                "Kalem": ["Uzay Kafes Çeliği", "Dikme/Aşık Çeliği", "Toplam Küre", "Kaynak İşlemi"],
+                "Kalem": ["Uzay Kafes Çeliği (Zonal)", "Dikme/Aşık Çeliği", "Toplam Küre", "Kaynak İşlemi"],
                 "Miktar": [f"{total_steel_weight_kg/1000:.1f} Ton", f"{total_secondary_steel_kg/1000:.1f} Ton", f"{total_kure_count} Adet", f"{total_chords_count} Adet"],
                 "Tutar": [f"${(total_steel_weight_kg * price_steel):,.0f}", f"${(total_secondary_steel_kg * price_steel):,.0f}", f"${(total_kure_count * price_kure):,.0f}", f"${(total_chords_count * price_labor):,.0f}"]
             })
             st.table(metraj_df.set_index("Kalem"))
             st.info(f"💰 **Toplam Tahmini Bütçe: ${total_project_cost:,.0f}**")
             
-            st.markdown("### 🏭 Kaynak Otomasyon İş Emri")
-            st.caption("Aşağıdaki buton ile hesaplanan tüm boruların kesim ve imalat verilerini CSV formatında fabrikaya gönderebilirsiniz.")
-            
+            # ZONAL İŞ EMRİ
+            st.markdown("### 📥 Otomasyon İş Emri (3 Zonlu)")
             wo_data = []
-            for _ in range(bottom_chords_count + top_chords_count):
-                wo_data.append({"Parça Tipi": "Yatay Başlık", "Kesim Boyu (mm)": int(best_modul*1000), "Boru": best_pipe['Boru'], "Konik": best_pipe['Konik'], "Civata": best_pipe['Civata'], "İşlem": "Otomasyon"})
-            for _ in range(diagonal_chords_count):
-                wo_data.append({"Parça Tipi": "Çapraz Diyagonal", "Kesim Boyu (mm)": int(best_length), "Boru": best_pipe['Boru'], "Konik": best_pipe['Konik'], "Civata": best_pipe['Civata'], "İşlem": "Otomasyon"})
+            for _ in range(z1_count): wo_data.append({"Bölge": "Zon 1 (Merkez/Mesnet)", "Parça Tipi": "Çubuk", "Boy (mm)": int(best_length), "Boru": best_z1['Boru'], "Konik": best_z1['Konik'], "Civata": best_z1['Civata']})
+            for _ in range(z2_count): wo_data.append({"Bölge": "Zon 2 (Geçiş)", "Parça Tipi": "Çubuk", "Boy (mm)": int(best_length), "Boru": best_z2['Boru'], "Konik": best_z2['Konik'], "Civata": best_z2['Civata']})
+            for _ in range(z3_count): wo_data.append({"Bölge": "Zon 3 (Kenar/Köşe)", "Parça Tipi": "Çubuk", "Boy (mm)": int(best_length), "Boru": best_z3['Boru'], "Konik": best_z3['Konik'], "Civata": best_z3['Civata']})
             
-            df_wo = pd.DataFrame(wo_data)
-            csv = df_wo.to_csv(index=False).encode('utf-8')
-            
-            st.download_button(
-                label="📥 İmalat İş Emrini İndir (CSV)",
-                data=csv,
-                file_name=f'Altinyaldiz_Is_Emri_{span_L}x{width_W}.csv',
-                mime='text/csv',
-                use_container_width=True
-            )
+            csv = pd.DataFrame(wo_data).to_csv(index=False).encode('utf-8')
+            st.download_button(label="📥 İmalat İş Emrini İndir (CSV)", data=csv, file_name=f'Altinyaldiz_Zonal_Is_Emri_{span_L}x{width_W}.csv', mime='text/csv', use_container_width=True)
 
         with col_grafik:
             st.subheader(f"🧊 {cati_formu} ({span_L}m x {width_W}m)")
@@ -176,6 +171,11 @@ if check_password():
             node_x, node_y, node_z, purlin_nodes = [], [], [], {}
             bottom_nodes, top_nodes = {}, {}
             
+            def get_z_offset(x, y):
+                if cati_formu == "Düz / Beşik": return 0
+                elif cati_formu == "Tonoz": return arch_rise * math.sin(math.pi * x / span_L)
+                elif cati_formu == "Kubbe": return arch_rise * math.sin(math.pi * x / span_L) * math.sin(math.pi * y / width_W)
+
             for i in range(Nx + 1):
                 for j in range(Ny + 1):
                     bottom_nodes[(i, j)] = len(node_x)
@@ -188,7 +188,6 @@ if check_password():
                     tx, ty = i * best_modul + best_modul/2, j * best_modul + best_modul/2
                     tz = depth_d + get_z_offset(tx, ty)
                     node_x.append(tx); node_y.append(ty); node_z.append(tz)
-                    
                     standoff_h = 0.20 + (min(tx, grid_L - tx) * (roof_slope / 100.0)) if cati_formu == "Düz / Beşik" else 0.20
                     purlin_nodes[(i, j)] = (tx, ty, tz + standoff_h)
                     
@@ -205,13 +204,10 @@ if check_password():
                     if i < Nx - 1: add_line(top_nodes[(i, j)], top_nodes[(i+1, j)], line_x, line_y, line_z)
                     if j < Ny - 1: add_line(top_nodes[(i, j)], top_nodes[(i, j+1)], line_x, line_y, line_z)
                     
-                    # DÜZELTİLEN KISIM: Her bir düğüm için kendi güncel koordinatını alıyoruz!
                     curr_node_idx = top_nodes[(i, j)]
                     ctx, cty, ctz = node_x[curr_node_idx], node_y[curr_node_idx], node_z[curr_node_idx]
-                    
                     px1, py1, pz1 = purlin_nodes[(i, j)]
                     s_line_x.extend([ctx, px1, None]); s_line_y.extend([cty, py1, None]); s_line_z.extend([ctz, pz1, None])
-                    
                     if j < Ny - 1:
                         px2, py2, pz2 = purlin_nodes[(i, j+1)]
                         p_line_x.extend([px1, px2, None]); p_line_y.extend([py1, py2, None]); p_line_z.extend([pz1, pz2, None])
